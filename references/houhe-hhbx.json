@@ -1,0 +1,116 @@
+{
+  "profile_name": "后河 HHBX 样地清查表",
+  "columns": [
+    "小方",
+    "标牌号",
+    "物种名",
+    "X",
+    "Y",
+    "DBH",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "备注"
+  ],
+  "expected_column_boundaries": 14,
+  "allowed_column_boundaries": [
+    13,
+    14
+  ],
+  "printed_rows": 40,
+  "reference_x_boundaries": [
+    126,
+    186,
+    329,
+    492,
+    577,
+    666,
+    756,
+    829,
+    906,
+    988,
+    1077,
+    1166,
+    1240,
+    1346
+  ],
+  "small_min": 1,
+  "small_max": 16,
+  "coordinate_min_m": 0,
+  "coordinate_max_m": 5,
+  "dbh_min_exclusive": 0,
+  "dbh_soft_max_cm": 150,
+  "tag_regex": "^HHBX(?P<sample>[0-9]{4})(?P<serial>[0-9]{4})$",
+  "sample_regex": "^[0-9]{4}$",
+  "branch_types": [
+    "g",
+    "z"
+  ],
+  "remark_mode": "tree_status_only",
+  "remark_keep_patterns": [
+    "枯立",
+    "枯倒",
+    "枯干",
+    "枯死",
+    "断枝",
+    "断裂",
+    "断头",
+    "倒伏",
+    "顶枯",
+    "缺株",
+    "缺牌"
+  ],
+  "remark_drop_patterns": [
+    "已弃",
+    "已采",
+    "已锯",
+    "^同\\s*[0-9?？]",
+    "标本"
+  ],
+  "species_aliases": {
+    "丽叶女真": {
+      "name": "丽叶女贞",
+      "source": "https://www.iplant.cn/z/frps/38097"
+    },
+    "木腊树": {
+      "name": "木蜡树",
+      "source": "https://www.iplant.cn/z/frps/25710"
+    },
+    "樟叶城": {
+      "name": "樟叶槭",
+      "source": "https://www.iplant.cn/bk/3E1D6F5B1F474153"
+    },
+    "光连蕊茶": {
+      "name": "尖连蕊茶",
+      "source": "https://www.iplant.cn/info/Camellia%20cuspidata?t=focn"
+    },
+    "长毛远志": {
+      "name": "长毛籽远志",
+      "source": "https://www.iplant.cn/info/Polygala%20wattersii?t=n"
+    },
+    "龙里青": {
+      "name": "龙里冬青",
+      "source": "https://www.iplant.cn/info/Ilex%20dunniana?t=focn"
+    },
+    "砚壳花椒": {
+      "name": "蚬壳花椒",
+      "source": "https://www.iplant.cn/info/Zanthoxylum%20dissitum?t=focn"
+    },
+    "砚叶花椒": {
+      "name": "蚬壳花椒",
+      "source": "https://www.iplant.cn/info/Zanthoxylum%20dissitum?t=focn"
+    },
+    "杉": {
+      "name": "杉木",
+      "source": "https://www.iplant.cn/z/frps/3015"
+    },
+    "漆树": {
+      "name": "漆",
+      "source": "https://www.iplant.cn/info/Toxicodendron%20vernicifluum?t=p"
+    }
+  },
+  "note": "本配置只适用于确认采用 HHBX 标牌格式、16 小方、5 m 坐标范围的表；单位须按页或逐行由原图确认。"
+}

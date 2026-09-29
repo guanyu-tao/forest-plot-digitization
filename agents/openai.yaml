@@ -1,0 +1,3 @@
+interface:
+  display_name: "森林样地清查表电子化"
+  short_description: "逐页识别、复核扫描清查表并生成可追溯 Excel"
