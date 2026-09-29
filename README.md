@@ -34,16 +34,25 @@ $work = "C:/temp/forest-work"
 
 逐页检查方向、清晰度、格线、实际记录数，按 [复核文件格式](references/review-schema.md) 填写工作目录中的 `page_reviews.json` 与 `reviewed.jsonl`。`reviewed_draft.jsonl` 只是 OCR 草稿，其中 `checked=false`；必须逐条看图后才能改成 `true`。格线或方向需要调整时，按该文档提供覆盖文件并重跑受影响步骤。非 HHBX 表须另建 profile 并核实表头、列数、小方范围、标牌规则、坐标范围、单位、备注规则。
 
+### 中文物种名录核对
+
+`names` 可接入**用户自行取得、有权使用的 CSV/XLSX 名录快照**。至少包含 `vernacularName`（或“物种中文名”“中文名”）与 `scientificName`（或“物种学名”“学名”）两列；推荐附 `isAcceptedName`、`acceptedNameUsageID`、`scientificNameID`。这些字段参照[中国植物物种名录数据规范](https://www.plantplus.cn/cn/standards/14)。可用[国家植物标本资源库的中国植物物种名录](https://www.cvh.ac.cn/species/taxon_tree.php)逐项人工核查；如需批量数据，请遵守数据提供方的获取与使用规则。仓库不附带第三方名录数据。
+
 ```powershell
-& $py scripts/forest_plot.py names --workdir $work
+& $py scripts/forest_plot.py names --workdir $work --catalog C:/catalog/plants.xlsx --catalog-source "中国植物物种名录" --catalog-version "2026"
+```
+
+输出的 `species_audit.json` 记录名录来源、版本和文件哈希，并区分精确命中、异名、一名多物及未命中；疑似错字仅列候选，**不会自动改名**。“未命中”只表示这份名录未收录，不证明物种不存在。没有名录时仍可运行 `names`，但终版会把缺少逐条名录依据的物种标为待核；已有原图和权威名录核对依据可在复核行的 `species_source` 中记录。
+
+```powershell
 & $py scripts/forest_plot.py finalize --workdir $work
 & $py scripts/export_xlsx.py --payload "$work/final_payload.json" --output-dir C:/output
 & $py scripts/forest_plot.py validate --workdir $work --output-dir C:/output
 ```
 
-`names` 仅列出候选别名；**不会自动改写物种名**。坐标仅在页或行有明确单位证据时换算为米；超过配置范围的原值会标记，不自动修正。已有输出默认拒绝覆盖；确认要替换时，导出命令显式加 `--overwrite`。
+`names` 使用名录时也不会自动改写物种名。坐标仅在页或行有明确单位证据时换算为米；超过配置范围的原值会标记，不自动修正。已有输出默认拒绝覆盖；确认要替换时，导出命令显式加 `--overwrite`。
 
-每个 PDF 得到一份 Excel，含主表、原始OCR、质检汇总、修订记录。主表只有一列最终中文物种名。OCR 原文与人工修订分开保存，便于追溯。
+每个 PDF 得到一份 Excel，含主表、原始OCR、质检汇总、修订记录、物种名录核对。主表只有一列最终中文物种名；名录状态与候选放在独立工作表。OCR 原文与人工修订分开保存，便于追溯。
 
 ## 隐私与局限
 

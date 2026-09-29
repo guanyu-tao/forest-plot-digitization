@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import bisect
 import collections
+import csv
+import difflib
 import hashlib
 import json
 import math
@@ -423,18 +425,88 @@ def remark_value(raw, profile, issues):
 def names(args):
     workdir = Path(args.workdir).resolve()
     profile = jread(Path(args.profile))
-    rows = list(jsonl(workdir / "reviewed.jsonl"))
+    reviewed_file = workdir / "reviewed.jsonl"
+    rows = list(jsonl(reviewed_file))
     counts = collections.Counter(str(r.get("species") or "").strip() for r in rows)
     aliases = profile.get("species_aliases", {})
+    catalog, catalog_meta = load_catalog(args.catalog, args.catalog_source, args.catalog_version)
     audit = []
     for name, count in sorted(counts.items(), key=lambda x: (-x[1], x[0])):
         if not name:
-            audit.append({"name": "", "count": count, "status": "原表空白，待核", "candidate": None, "source": None})
+            audit.append({"name": "", "count": count, "status": "原表空白，待核", "matches": [], "candidates": []})
             continue
         alias = aliases.get(name)
-        audit.append({"name": name, "count": count, "status": "有校正候选；仍须核对原图" if alias else "需对照原图和中文植物名录", "candidate": alias.get("name") if alias else None, "source": alias.get("source") if alias else None})
-    jwrite(workdir / "species_audit.json", audit)
-    print(json.dumps({"unique_names": len(audit), "requiring_image_review": sum(bool(x["name"]) for x in audit), "audit": str(workdir / "species_audit.json")}, ensure_ascii=False))
+        matches = catalog.get(name, []) if catalog is not None else []
+        taxa = {(m["scientific_name"], m["accepted_name_id"]) for m in matches}
+        if catalog is None:
+            status = "未接入名录"
+        elif not matches:
+            status = "名录未命中"
+        elif len(taxa) > 1:
+            status = "同名对应多个分类单元，待核"
+        elif any(m["accepted"] is False for m in matches) and not any(m["accepted"] is True for m in matches):
+            status = "精确命中异名，待核"
+        elif not any(m["accepted"] is True for m in matches):
+            status = "精确命中，接受状态未注明"
+        else:
+            status = "精确命中"
+        candidates = difflib.get_close_matches(name, catalog.keys(), n=5, cutoff=0.6) if catalog is not None and not matches else []
+        audit.append({"name": name, "count": count, "status": status, "matches": matches, "candidates": candidates, "profile_alias_candidate": alias.get("name") if alias else None, "profile_alias_source": alias.get("source") if alias else None})
+    jwrite(workdir / "species_audit.json", {"catalog": catalog_meta, "review_sha256": digest(reviewed_file), "audit": audit})
+    print(json.dumps({"unique_names": len(audit), "catalog_status": "已接入" if catalog is not None else "未接入", "requiring_name_review": sum(x["status"] != "精确命中" for x in audit), "audit": str(workdir / "species_audit.json")}, ensure_ascii=False))
+
+
+def load_catalog(path, source, version):
+    if path is None:
+        if source or version:
+            raise ValueError("--catalog-source/--catalog-version 仅在提供 --catalog 时使用")
+        return None, None
+    if not source:
+        raise ValueError("提供 --catalog 时必须注明 --catalog-source")
+    path = Path(path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    if path.suffix.lower() == ".csv":
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            records = list(csv.DictReader(f))
+    elif path.suffix.lower() == ".xlsx":
+        from openpyxl import load_workbook
+        book = load_workbook(path, read_only=True, data_only=True)
+        try:
+            values = book.active.values
+            first = next(values, None)
+            if first is None:
+                raise ValueError("名录工作簿为空")
+            headers = [str(x or "").strip() for x in first]
+            records = [dict(zip(headers, row)) for row in values]
+        finally:
+            book.close()
+    else:
+        raise ValueError("名录仅支持 UTF-8 CSV 或 XLSX")
+    if not records:
+        raise ValueError("名录没有数据行")
+    headers = set(records[0])
+    def field(*alternatives):
+        return next((x for x in alternatives if x in headers), None)
+    name_col = field("vernacularName", "物种中文名", "中文名")
+    sci_col = field("scientificName", "物种学名", "学名")
+    accepted_col = field("isAcceptedName", "是否为接受名")
+    accepted_id_col = field("acceptedNameUsageID", "接受名名称ID")
+    taxon_id_col = field("scientificNameID", "物种名称ID")
+    if not name_col or not sci_col:
+        raise ValueError("名录必须有中文名和学名列（如 vernacularName、scientificName）")
+    result = collections.defaultdict(list)
+    for line, record in enumerate(records, 2):
+        name = str(record.get(name_col) or "").strip()
+        scientific = str(record.get(sci_col) or "").strip()
+        if not name or not scientific:
+            continue
+        raw_accepted = str(record.get(accepted_col) or "").strip().lower() if accepted_col else ""
+        accepted = True if raw_accepted in ("1", "true", "是", "yes") else False if raw_accepted in ("0", "false", "否", "no") else None
+        result[name].append({"scientific_name": scientific, "accepted": accepted, "accepted_name_id": str(record.get(accepted_id_col) or "").strip() if accepted_id_col else "", "taxon_id": str(record.get(taxon_id_col) or "").strip() if taxon_id_col else "", "catalog_row": line})
+    if not result:
+        raise ValueError("名录没有非空的物种中文名与学名配对")
+    return result, {"source": source, "version": version or "未注明", "file": str(path), "sha256": digest(path), "records": len(records), "distinct_chinese_names": len(result)}
 
 
 def finalize(args):
@@ -443,6 +515,18 @@ def finalize(args):
     profile = jread(Path(args.profile))
     page_reviews = jread(workdir / "page_reviews.json")
     reviewed = list(jsonl(workdir / "reviewed.jsonl"))
+    audit_file = workdir / "species_audit.json"
+    catalog_meta = None
+    if audit_file.exists():
+        species_audit = jread(audit_file)
+        if isinstance(species_audit, list) or species_audit.get("review_sha256") != digest(workdir / "reviewed.jsonl"):
+            raise ValueError("物种名录核对结果已过期；请重新运行 names")
+        catalog_meta = species_audit.get("catalog")
+        if catalog_meta and (not Path(catalog_meta["file"]).is_file() or digest(Path(catalog_meta["file"])) != catalog_meta["sha256"]):
+            raise ValueError("物种名录文件已变化或不可用；请重新运行 names")
+        audit_by_name = {x["name"]: x for x in species_audit["audit"]}
+    else:
+        audit_by_name = {}
     by_location = {}
     for row in reviewed:
         missing = [key for key in REQUIRED if key not in row]
@@ -509,10 +593,14 @@ def finalize(args):
                 if re.search(r"[0-9?？]", species):
                     issue.append("物种名含数字或疑问号，需核对字形")
                 alias = profile.get("species_aliases", {}).get(species)
-                if alias:
+                catalog_status = audit_by_name.get(species, {}).get("status", "未核对")
+                if alias and catalog_status != "精确命中":
                     issue.append(f"物种名可能需校正为{alias['name']}；须按原图字形确认")
                 if not species:
                     issue.append("物种名空白")
+                elif not r.get("species_source"):
+                    if catalog_status != "精确命中":
+                        issue.append(f"物种名录核对：{catalog_status}")
                 if not r.get("date"):
                     issue.append("调查日期空白")
                 unit = r.get("xy_unit") or review.get("xy_unit")
@@ -575,7 +663,13 @@ def finalize(args):
                 raise FileNotFoundError(f"OCR证据缺失: {source}")
             for idx, token in enumerate(jread(source)["tokens"], 1):
                 raw.append([name, page, idx, token.get("text"), token.get("score"), json.dumps(token.get("poly"), ensure_ascii=False)])
-        outputs.append({"source_pdf": item["path"], "source_sha256": item["sha256"], "file_name": item["stem"] + "_录入最终版.xlsx", "page_count": item["pages"], "main": main, "raw": raw, "summary": summary, "changes": changes, "record_count": len(main), "pending_count": sum(r[-2] == "待人工核对" for r in main)})
+        species_counts = collections.Counter(row[7] for row in main if row[7])
+        species_catalog = []
+        for species_name, count in sorted(species_counts.items()):
+            result = audit_by_name.get(species_name, {})
+            matches = result.get("matches", [])
+            species_catalog.append([species_name, count, result.get("status", "未核对"), "；".join(dict.fromkeys(m["scientific_name"] for m in matches)) or None, "；".join(result.get("candidates", [])) or result.get("profile_alias_candidate"), catalog_meta["source"] if audit_file.exists() and catalog_meta else None, catalog_meta["version"] if audit_file.exists() and catalog_meta else None])
+        outputs.append({"source_pdf": item["path"], "source_sha256": item["sha256"], "file_name": item["stem"] + "_录入最终版.xlsx", "page_count": item["pages"], "main": main, "raw": raw, "summary": summary, "changes": changes, "species_catalog": species_catalog, "record_count": len(main), "pending_count": sum(r[-2] == "待人工核对" for r in main)})
     payload = {"profile": profile["profile_name"], "outputs": outputs}
     jwrite(workdir / "final_payload.json", payload)
     print(json.dumps({"outputs": [{"file": x["file_name"], "rows": x["record_count"], "pending": x["pending_count"]} for x in outputs]}, ensure_ascii=False))
@@ -594,7 +688,7 @@ def validate(args):
             raise AssertionError(f"原 PDF 哈希变化：{source}")
         path = output_dir / item["file_name"]
         wb = load_workbook(path, read_only=False, data_only=True)
-        if wb.sheetnames != ["主表", "原始OCR", "质检汇总", "修订记录"]:
+        if wb.sheetnames != ["主表", "原始OCR", "质检汇总", "修订记录", "物种名录核对"]:
             raise AssertionError((path, wb.sheetnames))
         main = wb["主表"]
         rows = list(main.values)
@@ -614,6 +708,8 @@ def validate(args):
             raise AssertionError(f"OCR条数不符：{path}")
         if len(wb["修订记录"]["A"]) - 1 != len(item["changes"]):
             raise AssertionError(f"修订日志条数不符：{path}")
+        if list(wb["物种名录核对"].values)[1:] != [tuple(row) for row in item["species_catalog"]]:
+            raise AssertionError(f"物种名录核对表不符：{path}")
         if any(not isinstance(row[7], str) and row[7] is not None for row in rows[1:]):
             raise AssertionError(f"物种名类型不符：{path}")
         results.append({"path": str(path), "pages": item["page_count"], "rows": item["record_count"], "pending": item["pending_count"], "changes": len(item["changes"])})
@@ -644,6 +740,10 @@ def parser():
             a.add_argument("--structure", action="store_true", help="改用 PP-StructureV3")
         if command in ("candidates", "names", "finalize"):
             a.add_argument("--profile", default=str(DEFAULT_PROFILE))
+        if command == "names":
+            a.add_argument("--catalog", help="用户自行取得的中文植物名录 CSV/XLSX 文件")
+            a.add_argument("--catalog-source", help="名录来源名称或网址")
+            a.add_argument("--catalog-version", help="名录版本或下载日期")
         a.set_defaults(func=func)
     v = sub.add_parser("validate", help="重新打开成品并核对")
     v.add_argument("--workdir", required=True)

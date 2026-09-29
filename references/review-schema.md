@@ -19,7 +19,7 @@
 
 如果同页混用单位，`xy_unit` 设为 `mixed`，各行分别写 `xy_unit` 和 `unit_evidence`。若无法确定，写 `unknown`，`finalize` 会把 X/Y 留空并标记待核。不要只根据数值范围选择单位。
 
-`reviewed.jsonl` 每行至少含 `pdf`, `page`, `row`, `checked`, `sample`, `small`, `tag`, `species`, `x`, `y`, `dbh`, `d1`…`d6`, `remark`。可加 `date`, `xy_unit`, `unit_evidence`, `small_source`, `species_source`, `status`, `issue`, `confidence`, `edits`。示例：
+`reviewed.jsonl` 每行至少含 `pdf`, `page`, `row`, `checked`, `sample`, `small`, `tag`, `species`, `x`, `y`, `dbh`, `d1`…`d6`, `remark`。可加 `date`, `xy_unit`, `unit_evidence`, `small_source`, `species_source`, `status`, `issue`, `confidence`, `edits`。`species_source` 用于记录逐条人工核名所依据的权威名录条目或链接；它不能代替原图字形复核。示例：
 
 ```json
 {"pdf":"SAMPLE.pdf","page":1,"row":1,"checked":true,"sample":"0304","small":2,"small_source":"原格明确","tag":"HHBX03040014","species":"尖连蕊茶","x":240,"y":310,"dbh":2.34,"d1":"1.25g1","d2":null,"d3":null,"d4":null,"d5":null,"d6":null,"remark":null,"confidence":"高","issue":"标牌原写疑似0055；结合字形及重号修订","edits":[{"field":"tag","from":"HHBX03040055","to":"HHBX03040014","evidence":"第1页第14行原图及两侧编号"}]}

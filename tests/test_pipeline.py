@@ -48,7 +48,7 @@ class PipelineTests(unittest.TestCase):
         ex.export_one(payload, output, self.output, False, 1)
         fp.validate(SimpleNamespace(workdir=str(self.work), output_dir=str(self.output)))
         book = load_workbook(self.output / output["file_name"])
-        self.assertEqual(book.sheetnames, ["主表", "原始OCR", "质检汇总", "修订记录"])
+        self.assertEqual(book.sheetnames, ["主表", "原始OCR", "质检汇总", "修订记录", "物种名录核对"])
         self.assertEqual(book["原始OCR"]["D2"].value, "=1+1")
         self.assertEqual(book["原始OCR"]["D2"].data_type, "s")
         with self.assertRaises(FileExistsError):
@@ -89,6 +89,51 @@ class PipelineTests(unittest.TestCase):
         payload = fp.jread(self.work / "final_payload.json")
         ex.export_one(payload, payload["outputs"][0], self.output, False, 1)
         fp.validate(SimpleNamespace(workdir=str(self.work), output_dir=str(self.output)))
+
+    def test_catalog_checks_names_without_auto_correction(self):
+        catalog = self.root / "catalog.csv"
+        catalog.write_text("vernacularName,scientificName,isAcceptedName,scientificNameID\n银杏,Ginkgo biloba,1,taxon-1\n", encoding="utf-8")
+        rows = [self.record(1, "HHBX03040001", 250, "银杏"), self.record(2, "HHBX03040002", 300, "银杏错")]
+        fp.write_jsonl(self.work / "reviewed.jsonl", rows)
+        fp.names(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE), catalog=str(catalog), catalog_source="synthetic catalog", catalog_version="test-1"))
+        audit = fp.jread(self.work / "species_audit.json")
+        by_name = {row["name"]: row for row in audit["audit"]}
+        self.assertEqual(audit["catalog"]["sha256"], fp.digest(catalog))
+        self.assertEqual(by_name["银杏"]["status"], "精确命中")
+        self.assertEqual(by_name["银杏错"]["status"], "名录未命中")
+        self.assertIn("银杏", by_name["银杏错"]["candidates"])
+        fp.finalize(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE)))
+        main = fp.jread(self.work / "final_payload.json")["outputs"][0]["main"]
+        self.assertEqual(main[0][7], "银杏")
+        self.assertEqual(main[0][-2], "图像复核通过")
+        self.assertEqual(main[1][7], "银杏错")
+        self.assertEqual(main[1][-2], "待人工核对")
+        self.assertIn("名录未命中", main[1][-1])
+        payload = fp.jread(self.work / "final_payload.json")
+        ex.export_one(payload, payload["outputs"][0], self.output, False, 1)
+        fp.validate(SimpleNamespace(workdir=str(self.work), output_dir=str(self.output)))
+        book = load_workbook(self.output / payload["outputs"][0]["file_name"])
+        self.assertEqual(book["物种名录核对"]["C2"].value, "精确命中")
+
+    def test_stale_catalog_audit_rejected(self):
+        catalog = self.root / "catalog.csv"
+        catalog.write_text("中文名,学名\n银杏,Ginkgo biloba\n", encoding="utf-8")
+        rows = [self.record(1, "HHBX03040001", 250, "银杏"), self.record(2, "HHBX03040002", 300, "银杏")]
+        fp.write_jsonl(self.work / "reviewed.jsonl", rows)
+        fp.names(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE), catalog=str(catalog), catalog_source="synthetic catalog", catalog_version="test-1"))
+        rows[1]["species"] = "银杏错"
+        fp.write_jsonl(self.work / "reviewed.jsonl", rows)
+        with self.assertRaisesRegex(ValueError, "已过期"):
+            fp.finalize(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE)))
+
+    def test_catalog_distinguishes_synonym_and_ambiguous_name(self):
+        catalog = self.root / "catalog.csv"
+        catalog.write_text("vernacularName,scientificName,isAcceptedName,acceptedNameUsageID\n旧名,Species alba,0,id-1\n重名,Species beta,1,id-2\n重名,Species gamma,1,id-3\n", encoding="utf-8")
+        fp.write_jsonl(self.work / "reviewed.jsonl", [self.record(1, "HHBX03040001", 250, "旧名"), self.record(2, "HHBX03040002", 300, "重名")])
+        fp.names(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE), catalog=str(catalog), catalog_source="synthetic catalog", catalog_version="test-1"))
+        by_name = {row["name"]: row for row in fp.jread(self.work / "species_audit.json")["audit"]}
+        self.assertEqual(by_name["旧名"]["status"], "精确命中异名，待核")
+        self.assertEqual(by_name["重名"]["status"], "同名对应多个分类单元，待核")
 
 
 if __name__ == "__main__":

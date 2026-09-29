@@ -18,6 +18,7 @@ HEADERS = {
     "raw": ["来源文件", "PDF页码", "OCR序号", "原始文本", "OCR置信度", "检测框"],
     "summary": ["来源文件", "PDF页码", "应有条数", "录入待核条数", "X/Y原始单位", "单位依据", "页备注"],
     "changes": ["来源文件", "PDF页码", "页内行号", "标牌号", "字段", "原值", "修订值", "处理", "依据", "置信度"],
+    "species_catalog": ["最终中文名", "记录数", "名录核对状态", "名录学名", "近似名称候选", "名录来源", "名录版本"],
 }
 
 
@@ -90,6 +91,11 @@ def export_one(payload, source, output_dir: Path, overwrite: bool, index: int):
     write_rows(changes, [HEADERS["changes"], *source["changes"]], 10)
     header(changes)
     widths(changes, {"A": 32, "B": 18, "C": 18, "D": 18, "E": 18, "F": 22, "G": 22, "H": 18, "I": 70, "J": 16})
+
+    catalog = wb.create_sheet("物种名录核对")
+    write_rows(catalog, [HEADERS["species_catalog"], *source["species_catalog"]], 7)
+    header(catalog)
+    widths(catalog, {"A": 22, "B": 12, "C": 30, "D": 42, "E": 38, "F": 34, "G": 18})
 
     temporary = target.with_name(target.name + ".partial")
     if temporary.exists():
