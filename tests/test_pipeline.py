@@ -61,6 +61,35 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "页码范围外"):
             fp.finalize(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE)))
 
+    def test_unknown_unit_is_not_guessed(self):
+        reviews = fp.jread(self.work / "page_reviews.json")
+        reviews[self.pdf.name]["1"]["xy_unit"] = "unknown"
+        fp.jwrite(self.work / "page_reviews.json", reviews)
+        rows = [self.record(1, "HHBX03040001", 250, "已核物种"), self.record(2, "HHBX03040002", 300, "已核物种")]
+        fp.write_jsonl(self.work / "reviewed.jsonl", rows)
+        fp.finalize(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE)))
+        main = fp.jread(self.work / "final_payload.json")["outputs"][0]["main"]
+        self.assertIsNone(main[0][8])
+        self.assertIsNone(main[0][9])
+        self.assertIn("单位未由原图确认", main[0][-1])
+
+    def test_unreviewed_record_rejected(self):
+        rows = [self.record(1, "HHBX03040001", 250), self.record(2, "HHBX03040002", 300)]
+        rows[1]["checked"] = False
+        fp.write_jsonl(self.work / "reviewed.jsonl", rows)
+        with self.assertRaisesRegex(ValueError, "尚未图像复核"):
+            fp.finalize(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE)))
+
+    def test_empty_page_exports_and_validates(self):
+        reviews = fp.jread(self.work / "page_reviews.json")
+        reviews[self.pdf.name]["1"]["expected_rows"] = 0
+        fp.jwrite(self.work / "page_reviews.json", reviews)
+        fp.write_jsonl(self.work / "reviewed.jsonl", [])
+        fp.finalize(SimpleNamespace(workdir=str(self.work), profile=str(fp.DEFAULT_PROFILE)))
+        payload = fp.jread(self.work / "final_payload.json")
+        ex.export_one(payload, payload["outputs"][0], self.output, False, 1)
+        fp.validate(SimpleNamespace(workdir=str(self.work), output_dir=str(self.output)))
+
 
 if __name__ == "__main__":
     unittest.main()
